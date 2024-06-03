@@ -1,9 +1,12 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const session = require("express-session");
+const passport = require("passport");
+const LocalStrategy = require("passport-local");
+var crypto = require("crypto");
 
 // Package documentation - https://www.npmjs.com/package/connect-mongo
-const MongoStore = require("connect-mongo")(session);
+const MongoStore = require("connect-mongo");
 
 /**
  * -------------- GENERAL SETUP ----------------
@@ -31,7 +34,7 @@ app.use(express.urlencoded({ extended: true }));
  * DB_STRING=mongodb://<user>:<password>@localhost:27017/database_name
  */
 
-const connection = mongoose.createConnection(process.env.DB_STRING);
+mongoose.connect(process.env.MONGODB_URI);
 
 // Creates simple schema for a User.  The hash and salt are derived from the user's given password when they register
 const UserSchema = new mongoose.Schema({
@@ -52,8 +55,8 @@ mongoose.model("User", UserSchema);
  *
  * Note that the `connection` used for the MongoStore is the same connection that we are using above
  */
-const sessionStore = new MongoStore({
-  mongooseConnection: connection,
+const sessionStore = MongoStore.create({
+  mongoUrl: process.env.MONGODB_URI,
   collection: "sessions",
 });
 
