@@ -44,7 +44,7 @@ const UserSchema = new mongoose.Schema({
 });
 
 // Defines the model that we will use in the app
-mongoose.model("User", UserSchema);
+const User = mongoose.model("User", UserSchema);
 
 /**
  * -------------- SESSION SETUP ----------------
@@ -79,26 +79,165 @@ app.use(
     resave: false,
     saveUninitialized: true,
     store: sessionStore,
+    cookie: {
+      maxAge: 1000 * 30,
+    },
   })
 );
+
+/**
+ * -------------- Passport -----------
+ */
+
+// Helpers //
+// validate incoming password
+function validPassword(password, hash, salt) {
+  var hashVerify = crypto
+    .pbkdf2Sync(password, salt, 10000, 64, "sha512")
+    .toString("hex");
+  return hash === hashVerify;
+}
+
+// generate hashed password
+function genPassword(password) {
+  var salt = crypto.randomBytes(32).toString("hex");
+  var genHash = crypto
+    .pbkdf2Sync(password, salt, 10000, 64, "sha512")
+    .toString("hex");
+
+  return {
+    salt: salt,
+    hash: genHash,
+  };
+}
+
+// local Strat
+passport.use(
+  new LocalStrategy(async (username, password, done) => {
+    try {
+      const user = await User.findOne({ username: username });
+      if (!user) {
+        return done(null, false);
+      }
+
+      const isValid = validPassword(password, user.hash, user.salt);
+
+      if (!isValid) {
+        return done(null, false);
+      }
+
+      return done(null, user);
+    } catch (err) {
+      return done(err);
+    }
+  })
+);
+
+// store the user id in the session
+passport.serializeUser(function (user, cb) {
+  cb(null, user.id);
+});
+
+// use the user id in session to look them up in the database when needed
+passport.deserializeUser(async (id, done) => {
+  try {
+    const user = await User.findById(id);
+    done(null, user);
+  } catch (err) {
+    done(err);
+  }
+});
+
+app.use(passport.initialize());
+app.use(passport.session());
 
 /**
  * -------------- ROUTES ----------------
  */
 
-// When you visit http://localhost:3000/login, you will see "Login Page"
-app.get("/login", (req, res, next) => {
-  res.send("<h1>Login Page</h1>");
+app.get("/", (req, res, next) => {
+  res.send("<h1>Home</h1>");
 });
 
-app.post("/login", (req, res, next) => {});
+// When you visit http://localhost:3000/login, you will see "Login Page"
+app.get("/login", (req, res, next) => {
+  const form =
+    '<h1>Login Page</h1><form method="POST" action="/login">\
+    Enter Username:<br><input type="text" name="username">\
+    <br>Enter Password:<br><input type="password" name="password">\
+    <br><br><input type="submit" value="Submit"></form>';
+
+  res.send(form);
+});
+
+// Since we are using the passport.authenticate() method, we should be redirected no matter what
+app.post(
+  "/login",
+  passport.authenticate("local", {
+    failureRedirect: "/login-failure",
+    successRedirect: "login-success",
+  }),
+  (err, req, res, next) => {
+    if (err) next(err);
+  }
+);
 
 // When you visit http://localhost:3000/register, you will see "Register Page"
 app.get("/register", (req, res, next) => {
-  res.send("<h1>Register Page</h1>");
+  const form =
+    '<h1>Register Page</h1><form method="post" action="register">\
+                    Enter Username:<br><input type="text" name="username">\
+                    <br>Enter Password:<br><input type="password" name="password">\
+                    <br><br><input type="submit" value="Submit"></form>';
+
+  res.send(form);
 });
 
-app.post("/register", (req, res, next) => {});
+app.post("/register", (req, res, next) => {
+  const saltHash = genPassword(req.body.password);
+
+  const salt = saltHash.salt;
+  const hash = saltHash.hash;
+
+  const newUser = new User({
+    username: req.body.username,
+    hash: hash,
+    salt: salt,
+  });
+
+  newUser.save().then((user) => {
+    console.log(user);
+  });
+
+  res.redirect("/login");
+});
+
+// check authentication for a protected route
+app.get("/protected-route", (req, res, next) => {
+  console.log(req.session);
+  if (req.isAuthenticated()) {
+    res.send("<h1>You are authenticated</h1>");
+  } else {
+    res.send("<h1>You are not authenticated</h1>");
+  }
+});
+
+// Visiting this route logs the user out
+app.get("/logout", (req, res, next) => {
+  req.logout((err) => {
+    if (err) return next(err);
+  });
+  res.redirect("/login");
+});
+
+app.get("/login-success", (req, res, next) => {
+  console.log(req.session);
+  res.send("You successfully logged in.");
+});
+
+app.get("/login-failure", (req, res, next) => {
+  res.send("You entered the wrong password.");
+});
 
 /**
  * -------------- SERVER ----------------
